@@ -5,6 +5,11 @@
 
 rm(list=ls(all=TRUE))
 
+# required functions/packages
+source("modelrun.R")
+library(BayesFactor)
+library(brms)
+
 nsubj <- c(10,25,50,100)
 nobs <- seq(3,9,3)
 pop.sd.cont <- 1
@@ -17,7 +22,7 @@ intercept <- 0
 # mcmc values
 nadapt <- 1000
 nburn <- 1000
-mcmcstep <- c(100000)
+mcmcstep <- c(10000)
 
 # simulation values
 nreps <- 50
@@ -25,8 +30,6 @@ nreps <- 50
 # results container
 bfs <- matrix(nrow = nreps*length(nsubj)*length(eff.size.cont)*length(mcmcstep)*length(nobs), ncol = 7)
 
-source("modelrun.R")
-require(BayesFactor)
 count <- 1
 dat.str <- data.frame(iv = c("x.cont"), 
                       type = c("cont"),
@@ -46,16 +49,29 @@ for(rep in 1:nreps){
         vals$y = vals$x.cont*vals$b.cont + vals$error
         dat.model <- vals[, c("id", "y", "x.cont")]
         dat.model$id <- as.factor(dat.model$id)
+        
+        ## BayesFactor package:
         # extract bf for fixed effect from "true" b values with ttest of bayesfactor package
         tt.bfp <- ttestBF(x = unique(vals$b.cont), mu = 0)
         corr.bf <- tt.bfp@bayesFactor$bf
         
+        ## brms package:
+        fixefPrior <- c(set_prior("cauchy(0,0.353)", class="b"),
+                        set_prior("cauchy(0,0.353)", class="b", coef="x.cont"))
+        ranefPrior <- set_prior("gamma(1,0.04)", class="sd")
+        m_brms <- brm(y ~ x.cont + (1+x.cont|id),
+                               prior=c(fixefPrior, ranefPrior), chains=3, iter=10000, data=dat.model, save_all_pars=T,
+                               sample_prior = TRUE)
+        h_cont <- hypothesis(m_rms, "x.cont = 0")
+        
+        
+        ## BayesRS package:
         for(steps in mcmcstep){
           # run model and save bfs
           out <- modelrun(data = dat.model, dv = "y", dat.str = dat.str, nadapt = nadapt, nburn = nburn, nsteps = steps, 
                           checkconv = 0)
-          bf <- out[[1]]
-          bfs[count,] <- c(as.integer(count), n, k, ef.cont, steps, as.numeric(bf), corr.bf)
+          bf <- as.numeric(as.character(out[[1]]$bf))
+          bfs[count,] <- c(as.integer(count), n, k, ef.cont, steps, log(bf), corr.bf)
           print(count/nrow(bfs)*100)
           name <- paste("bfs", count, ".Rda", sep = "")
           save(bfs, file = name)
