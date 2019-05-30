@@ -10,25 +10,28 @@ source("modelrun.R")
 library(BayesFactor)
 library(brms)
 
-nsubj <- c(10,25,50,100)
-nobs <- seq(3,9,3)
+nsubj <- 10 #c(10,25,50,100)
+nobs <- 3 #seq(3,9,3)
 pop.sd.cont <- 1
 ncont <- 1
 xcont <- seq(1,5,1)
 xcont.mc <- xcont-mean(xcont)
-eff.size.cont <- c(0, 0.2, 0.5, 0.8)
+eff.size.cont <- .2 #c(0, 0.2, 0.5, 0.8)
 intercept <- 0
 
-# mcmc values
-nadapt <- 1000
-nburn <- 1000
-mcmcstep <- c(10000)
+# mcmc values BayesRS
+nadapt_rs <- 1000
+nburn_rs <- 1000
+mcmcstep_rs <- c(100000)
+# mcmc values brms
+mcmcstep_brms <- 10000
+n_chains_brms <- 3
 
 # simulation values
-nreps <- 50
+nreps <- 2
 
 # results container
-bfs <- matrix(nrow = nreps*length(nsubj)*length(eff.size.cont)*length(mcmcstep)*length(nobs), ncol = 7)
+bfs <- matrix(nrow = nreps*length(nsubj)*length(eff.size.cont)*length(mcmcstep_rs)*length(nobs), ncol = 8)
 
 count <- 1
 dat.str <- data.frame(iv = c("x.cont"), 
@@ -55,26 +58,27 @@ for(rep in 1:nreps){
         tt.bfp <- ttestBF(x = unique(vals$b.cont), mu = 0)
         corr.bf <- tt.bfp@bayesFactor$bf
         
+        
+        
         ## brms package:
-        fixefPrior <- c(set_prior("cauchy(0,0.353)", class="b"),
-                        set_prior("cauchy(0,0.353)", class="b", coef="x.cont"))
+        fixefPrior <- c(set_prior("cauchy(0,0.353)", class="b", coef="x.cont"))
         ranefPrior <- set_prior("gamma(1,0.04)", class="sd")
         m_brms <- brm(y ~ x.cont + (1+x.cont|id),
-                               prior=c(fixefPrior, ranefPrior), chains=3, iter=10000, data=dat.model, save_all_pars=T,
-                               sample_prior = TRUE)
-        h_cont <- hypothesis(m_rms, "x.cont = 0")
-        
+                               prior=c(fixefPrior, ranefPrior), chains=n_chains_brms, iter=mcmcstep_brms, 
+                      data=dat.model, save_all_pars=TRUE, sample_prior = TRUE)
+        h_cont <- hypothesis(m_brms, "x.cont = 0")
+        bf_brms <- h_cont$hypothesis$Evid.Ratio
         
         ## BayesRS package:
-        for(steps in mcmcstep){
+        for(steps in mcmcstep_rs){
           # run model and save bfs
-          out <- modelrun(data = dat.model, dv = "y", dat.str = dat.str, nadapt = nadapt, nburn = nburn, nsteps = steps, 
+          out <- modelrun(data = dat.model, dv = "y", dat.str = dat.str, 
+                          nadapt = nadapt_rs, nburn = nburn_rs, nsteps = steps, 
                           checkconv = 0)
           bf <- as.numeric(as.character(out[[1]]$bf))
-          bfs[count,] <- c(as.integer(count), n, k, ef.cont, steps, log(bf), corr.bf)
+          bfs[count,] <- c(as.integer(count), n, k, ef.cont, steps, log(bf), bf_brms, corr.bf)
           print(count/nrow(bfs)*100)
-          name <- paste("bfs", count, ".Rda", sep = "")
-          save(bfs, file = name)
+          save(bfs, file = "bfs.Rda")
           count <- count + 1
         }
       }
@@ -83,7 +87,7 @@ for(rep in 1:nreps){
 }
 
 bfs.df <- as.data.frame(bfs)
-names(bfs.df) <- c("x", "n",  "nobs", "ef.cont","mcmcsteps", "bf.cont", "bf.cont.true")
+names(bfs.df) <- c("x", "n",  "nobs", "ef.cont","mcmcsteps", "bf.cont", "bf.cont.brms", "bf.cont.true")
 
 require(ggplot2)
 
