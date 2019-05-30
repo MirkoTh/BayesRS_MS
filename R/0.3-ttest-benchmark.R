@@ -9,6 +9,7 @@ rm(list=ls(all=TRUE))
 source("modelrun.R")
 library(BayesFactor)
 library(brms)
+library(tidyverse)
 
 nsubj <- 10 #c(10,25,50,100)
 nobs <- 3 #seq(3,9,3)
@@ -110,6 +111,15 @@ plotTheme <- function (plot){
 bfs.df$n[bfs.df$n==20] <- "N = 20"
 bfs.df$n[bfs.df$n==40] <- "N = 40"
 bfs.df$n <- as.factor(bfs.df$n)
+bfs.df$bf_true_vs_rs <- bfs.df$bf.cont.true - bfs.df$bf.cont
+bfs.df$bf_true_vs_brms <- bfs.df$bf.cont.true - bfs.df$bf.cont.brms
+bfs.df$bf_rs_vs_brms <- bfs.df$bf.cont - bfs.df$bf.cont.brms
+
+bfs_long <- bfs.df %>% gather(Comparison, BF_log_diff, bf_true_vs_rs:bf_rs_vs_brms)
+
+ggplot(bfs_long, aes(bf.cont.true, BF_log_diff, group = Comparison)) + 
+  geom_point(aes(color = Comparison)) +
+  facet_wrap(~Comparison)
 
 # bfs.df$bf.cont.true<10&
 v.min <- -16
