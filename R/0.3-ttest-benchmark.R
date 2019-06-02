@@ -4,6 +4,7 @@
 # therefore, more values for nsubj in this simulation, but set eff.size.cat to 0
 
 rm(list=ls(all=TRUE))
+Sys.setenv(LOCAL_CPP = "-mtune = native")
 
 # required functions/packages
 source("modelrun.R")
@@ -11,28 +12,33 @@ library(BayesFactor)
 library(brms)
 library(tidyverse)
 
-nsubj <- 10 #c(10,25,50,100)
-nobs <- 3 #seq(3,9,3)
+nsubj <- c(20, 40)
+nobs <- 6
 pop.sd.cont <- 1
 ncont <- 1
 xcont <- seq(1,5,1)
 xcont.mc <- xcont-mean(xcont)
-eff.size.cont <- .2 #c(0, 0.2, 0.5, 0.8)
+eff.size.cont <- c(0, 0.2, 0.5, 0.8)
 intercept <- 0
 
-# mcmc values BayesRS
-nadapt_rs <- 1000
-nburn_rs <- 1000
-mcmcstep_rs <- c(100000)
+# mcmc values BayesRS (brs for BayesRS)
+nadapt_brs <- 1000
+nburn_brs <- 1000
+mcmcstep_brs <- c(10000)
 # mcmc values brms
 mcmcstep_brms <- 10000
-n_chains_brms <- 3
+n_chains_brms <- 1#3
+
+# brms specifications
+fixefPrior <- c(set_prior("cauchy(0,0.353)", class="b", coef="x.cont"))
+ranefPrior <- set_prior("gamma(1,0.04)", class="sd")
+control = list(adapt_delta = .9)
 
 # simulation values
 nreps <- 2
 
 # results container
-bfs <- matrix(nrow = nreps*length(nsubj)*length(eff.size.cont)*length(mcmcstep_rs)*length(nobs), ncol = 8)
+bfs <- matrix(nrow = nreps*length(nsubj)*length(eff.size.cont)*length(mcmcstep_brs)*length(nobs), ncol = 9)
 
 count <- 1
 dat.str <- data.frame(iv = c("x.cont"), 
@@ -57,28 +63,37 @@ for(rep in 1:nreps){
         ## BayesFactor package:
         # extract bf for fixed effect from "true" b values with ttest of bayesfactor package
         tt.bfp <- ttestBF(x = unique(vals$b.cont), mu = 0)
-        corr.bf <- tt.bfp@bayesFactor$bf
-        
-        
+        bf_bfp <- tt.bfp@bayesFactor$bf
         
         ## brms package:
-        fixefPrior <- c(set_prior("cauchy(0,0.353)", class="b", coef="x.cont"))
-        ranefPrior <- set_prior("gamma(1,0.04)", class="sd")
-        m_brms <- brm(y ~ x.cont + (1+x.cont|id),
-                               prior=c(fixefPrior, ranefPrior), chains=n_chains_brms, iter=mcmcstep_brms, 
-                      data=dat.model, save_all_pars=TRUE, sample_prior = TRUE)
-        h_cont <- hypothesis(m_brms, "x.cont = 0")
-        bf_brms <- h_cont$hypothesis$Evid.Ratio
+        # bf via savage-dickey method (savage-dickey aka sd)
+        m_brms_full_prior <- brm(y ~ x.cont + (1+x.cont|id),
+                           prior=c(fixefPrior, ranefPrior), chains=n_chains_brms, iter=mcmcstep_brms,
+                           data=dat.model, save_all_pars=TRUE, sample_prior = TRUE)
+        h_cont <- hypothesis(m_brms_full_prior, "x.cont = 0")
+        bf_brms_sd <- 1/h_cont$hypothesis$Evid.Ratio
+        
+        # bf via bridge sampler
+        m_brms_full_no_prior <- brm(y ~ x.cont + (1+x.cont|id),
+                                    prior=c(fixefPrior, ranefPrior), chains=n_chains_brms, iter=mcmcstep_brms,
+                                    data=dat.model, save_all_pars=TRUE)
+        m_brms_no_cont_fixed <- brm(y ~ (1+x.cont|id),
+                           prior=ranefPrior, chains=n_chains_brms, iter=mcmcstep_brms, 
+                           data=dat.model, save_all_pars=TRUE)
+        bf_brms_bridge <- bayes_factor(m_brms_full_no_prior, m_brms_no_cont_fixed)
+        
         
         ## BayesRS package:
-        for(steps in mcmcstep_rs){
+        for(steps in mcmcstep_brs){
           # run model and save bfs
           out <- modelrun(data = dat.model, dv = "y", dat.str = dat.str, 
-                          nadapt = nadapt_rs, nburn = nburn_rs, nsteps = steps, 
+                          nadapt = nadapt_brs, nburn = nburn_brs, nsteps = steps, 
                           checkconv = 0)
-          bf <- as.numeric(as.character(out[[1]]$bf))
-          bfs[count,] <- c(as.integer(count), n, k, ef.cont, steps, log(bf), bf_brms, corr.bf)
-          print(count/nrow(bfs)*100)
+          bf_brs_sd <- as.numeric(as.character(out[[1]]$bf))
+          # add all in same df
+          bfs[count,] <- c(as.integer(count), n, k, ef.cont, steps, log(bf_bfp), 
+                           log(bf_brms_bridge$bf), log(bf_brms_sd), log(bf_brs_sd))
+          print(paste0(count/nrow(bfs)*100, "% of all runs"))
           save(bfs, file = "bfs.Rda")
           count <- count + 1
         }
@@ -88,9 +103,8 @@ for(rep in 1:nreps){
 }
 
 bfs.df <- as.data.frame(bfs)
-names(bfs.df) <- c("x", "n",  "nobs", "ef.cont","mcmcsteps", "bf.cont", "bf.cont.brms", "bf.cont.true")
-
-require(ggplot2)
+names(bfs.df) <- c("x", "n",  "nobs", "ef.cont","mcmcsteps", "bf.bfp",
+                   "bf.brms.bridge", "bf.brms.sd", "bf.brs.sd")
 
 # plotting scheme ####
 plotTheme <- function (plot){
@@ -111,20 +125,27 @@ plotTheme <- function (plot){
 bfs.df$n[bfs.df$n==20] <- "N = 20"
 bfs.df$n[bfs.df$n==40] <- "N = 40"
 bfs.df$n <- as.factor(bfs.df$n)
-bfs.df$bf_true_vs_rs <- bfs.df$bf.cont.true - bfs.df$bf.cont
-bfs.df$bf_true_vs_brms <- bfs.df$bf.cont.true - bfs.df$bf.cont.brms
-bfs.df$bf_rs_vs_brms <- bfs.df$bf.cont - bfs.df$bf.cont.brms
+bfs.df$bf_bfp_vs_brms_bridge <- bfs.df$bf.bfp - bfs.df$bf.brms.bridge
+bfs.df$bf_bfp_vs_brms_sd <- bfs.df$bf.bfp - bfs.df$bf.brms.sd
+bfs.df$bf_bfp_vs_brs_sd <- bfs.df$bf.bfp - bfs.df$bf.brs.sd
+bfs.df$bf_brms_bridge_vs_brms_sd <- bfs.df$bf.brms.bridge - bfs.df$bf.brms.sd
+bfs.df$bf_brms_bridge_vs_brs_sd <- bfs.df$bf.brms.bridge - bfs.df$bf.brs.sd
+bfs.df$bf_brms_sd_vs_brs_sd <- bfs.df$bf.brms.sd - bfs.df$bf.brs.sd
 
-bfs_long <- bfs.df %>% gather(Comparison, BF_log_diff, bf_true_vs_rs:bf_rs_vs_brms)
+bfs_long <- bfs.df %>% 
+  gather(Comparison, BF_log_diff, bf_bfp_vs_brms_bridge:bf_brms_sd_vs_brs_sd)
 
-ggplot(bfs_long, aes(bf.cont.true, BF_log_diff, group = Comparison)) + 
+ggplot(bfs_long, aes(bf.bfp, BF_log_diff, group = Comparison)) + 
   geom_point(aes(color = Comparison)) +
-  facet_wrap(~Comparison)
+  facet_wrap(~Comparison) + theme_bw() +
+  xlab("True Bayes Factor") + ylab("Log Diff BFs")
 
-# bfs.df$bf.cont.true<10&
+bfs_long_comp_bfp <- bfs.df %>% 
+  select(-bf_brms_bridge_vs_brms_sd, -bf_brms_bridge_vs_brs_sd, -bf_brms_sd_vs_brs_sd) %>%
+  gather(Comparison, BF_log_diff, bf_bfp_vs_brms_bridge:bf_bfp_vs_brs_sd)
 v.min <- -16
 v.max <- 16
-plotTheme(ggplot(bfs.df, aes(bf.cont.true, bf.cont-bf.cont.true)) + 
+plotTheme(ggplot(bfs_long_comp_bfp, aes(bf.bfp, BF_log_diff)) + 
             labs(title = "\n") +
             labs(x="\nLog(True BF)", y="Log(comp. BF)-Log(true BF)\n") + 
             geom_segment(aes(x = -5, y = 0, xend = 22, yend = 0, colour = "red"), size = 1.5)+
@@ -133,7 +154,8 @@ plotTheme(ggplot(bfs.df, aes(bf.cont.true, bf.cont-bf.cont.true)) +
             geom_segment(aes(x = 2.3026, y = v.min, xend = 2.3026, yend = v.max), size = .5) +
             geom_segment(aes(x = -1.1, y = v.min, xend = -1.1, yend = v.max), size = 1) +
             geom_segment(aes(x = 1.1, y = v.min, xend = 1.1, yend = v.max), size = 1)) +
-  coord_cartesian(ylim = c(v.min, v.max)) + theme(legend.position = "hide")
+  coord_cartesian(ylim = c(v.min, v.max)) + theme(legend.position = "hide") +
+  facet_wrap(n ~ Comparison)
 
 # manually inspect outliers
 filter <- bfs.df$mcmcsteps == 50000 & bfs.df$bf.cont.true<(-1.1) & bfs.df$bf.cont.true>-999
