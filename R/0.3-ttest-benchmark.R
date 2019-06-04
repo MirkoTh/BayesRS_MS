@@ -8,12 +8,13 @@ Sys.setenv(LOCAL_CPP = "-mtune = native")
 
 # required functions/packages
 source("modelrun.R")
+source("utils.R")
 library(BayesFactor)
 library(brms)
 library(tidyverse)
 
 nsubj <- c(20, 40)
-nobs <- 6
+nobs <- 10
 pop.sd.cont <- 1
 ncont <- 1
 xcont <- seq(1,5,1)
@@ -68,8 +69,8 @@ for(rep in 1:nreps){
         ## brms package:
         # bf via savage-dickey method (savage-dickey aka sd)
         m_brms_full_prior <- brm(y ~ x.cont + (1+x.cont|id),
-                           prior=c(fixefPrior, ranefPrior), chains=n_chains_brms, iter=mcmcstep_brms,
-                           data=dat.model, save_all_pars=TRUE, sample_prior = TRUE)
+                                 prior=c(fixefPrior, ranefPrior), chains=n_chains_brms, iter=mcmcstep_brms,
+                                 data=dat.model, save_all_pars=TRUE, sample_prior = TRUE)
         h_cont <- hypothesis(m_brms_full_prior, "x.cont = 0")
         bf_brms_sd <- 1/h_cont$hypothesis$Evid.Ratio
         
@@ -78,8 +79,8 @@ for(rep in 1:nreps){
                                     prior=c(fixefPrior, ranefPrior), chains=n_chains_brms, iter=mcmcstep_brms,
                                     data=dat.model, save_all_pars=TRUE)
         m_brms_no_cont_fixed <- brm(y ~ (1+x.cont|id),
-                           prior=ranefPrior, chains=n_chains_brms, iter=mcmcstep_brms, 
-                           data=dat.model, save_all_pars=TRUE)
+                                    prior=ranefPrior, chains=n_chains_brms, iter=mcmcstep_brms, 
+                                    data=dat.model, save_all_pars=TRUE)
         bf_brms_bridge <- bayes_factor(m_brms_full_no_prior, m_brms_no_cont_fixed)
         
         
@@ -91,7 +92,7 @@ for(rep in 1:nreps){
                           checkconv = 0)
           bf_brs_sd <- as.numeric(as.character(out[[1]]$bf))
           # add all in same df
-          bfs[count,] <- c(as.integer(count), n, k, ef.cont, steps, log(bf_bfp), 
+          bfs[count,] <- c(as.integer(count), n, k, ef.cont, steps, bf_bfp, 
                            log(bf_brms_bridge$bf), log(bf_brms_sd), log(bf_brs_sd))
           print(paste0(count/nrow(bfs)*100, "% of all runs"))
           save(bfs, file = "bfs.Rda")
@@ -106,46 +107,50 @@ bfs.df <- as.data.frame(bfs)
 names(bfs.df) <- c("x", "n",  "nobs", "ef.cont","mcmcsteps", "bf.bfp",
                    "bf.brms.bridge", "bf.brms.sd", "bf.brs.sd")
 
-# plotting scheme ####
-plotTheme <- function (plot){
-  plot +
-    theme(panel.background = element_rect(fill = "black")) +
-    theme(panel.grid=element_blank(),panel.background=element_blank()) + theme_bw() + 
-    theme(plot.title = element_text(size = rel(1.75), hjust = 0)) + theme(axis.line = element_line(color ='black')) +
-    theme(legend.title = element_text(size=13))+
-    theme(legend.text = element_text(size = 13), legend.key = element_blank(), legend.box = 'horizontal')+
-    theme(axis.title.x = element_text(size=15),axis.text.x  = element_text(size=13))+  
-    theme(axis.title.y = element_text(size=15),axis.text.y  = element_text(size=13))+ 
-    theme(plot.background = element_blank(),panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank()) +
-    theme(strip.text = element_text(size = 12))
-}
-
 #### post proc ####
 bfs.df$n[bfs.df$n==20] <- "N = 20"
 bfs.df$n[bfs.df$n==40] <- "N = 40"
 bfs.df$n <- as.factor(bfs.df$n)
+
+
+# all against bfp
+bfs.df$bf_brms_bridge_vs_bfp <- bfs.df$bf.brms.bridge - bfs.df$bf.bfp
+bfs.df$bf_brms_sd_vs_bfp <- bfs.df$bf.brms.sd - bfs.df$bf.bfp
+bfs.df$bf_brs_sd_vs_bfp <- bfs.df$bf.brs.sd - bfs.df$bf.bfp
+# all against brms bridge
 bfs.df$bf_bfp_vs_brms_bridge <- bfs.df$bf.bfp - bfs.df$bf.brms.bridge
-bfs.df$bf_bfp_vs_brms_sd <- bfs.df$bf.bfp - bfs.df$bf.brms.sd
-bfs.df$bf_bfp_vs_brs_sd <- bfs.df$bf.bfp - bfs.df$bf.brs.sd
-bfs.df$bf_brms_bridge_vs_brms_sd <- bfs.df$bf.brms.bridge - bfs.df$bf.brms.sd
-bfs.df$bf_brms_bridge_vs_brs_sd <- bfs.df$bf.brms.bridge - bfs.df$bf.brs.sd
+bfs.df$bf_brms_sd_vs_brms_bridge <- bfs.df$bf.brms.sd - bfs.df$bf.brms.bridge
+bfs.df$bf_brs_sd_vs_brms_bridge <- bfs.df$bf.brs.sd - bfs.df$bf.brms.bridge
+# compare two sd methods
 bfs.df$bf_brms_sd_vs_brs_sd <- bfs.df$bf.brms.sd - bfs.df$bf.brs.sd
 
-bfs_long <- bfs.df %>% 
-  gather(Comparison, BF_log_diff, bf_bfp_vs_brms_bridge:bf_brms_sd_vs_brs_sd)
-
-ggplot(bfs_long, aes(bf.bfp, BF_log_diff, group = Comparison)) + 
-  geom_point(aes(color = Comparison)) +
-  facet_wrap(~Comparison) + theme_bw() +
-  xlab("True Bayes Factor") + ylab("Log Diff BFs")
-
 bfs_long_comp_bfp <- bfs.df %>% 
-  select(-bf_brms_bridge_vs_brms_sd, -bf_brms_bridge_vs_brs_sd, -bf_brms_sd_vs_brs_sd) %>%
-  gather(Comparison, BF_log_diff, bf_bfp_vs_brms_bridge:bf_bfp_vs_brs_sd)
+  select(bf.bfp, bf_brms_bridge_vs_bfp, bf_brms_sd_vs_bfp, bf_brs_sd_vs_bfp) %>%
+  gather(Comparison, BF_log_diff, bf_brms_bridge_vs_bfp:bf_brs_sd_vs_bfp)
+
+plotTheme(ggplot(bfs_long_comp_bfp, aes(bf.bfp, BF_log_diff)) + 
+            geom_segment(aes(x = -5, y = 0, xend = 22, yend = 0, colour = "red"), size = 1.5)+
+            geom_segment(aes(x = 0, y = v.min, xend = 0, yend = v.max), size = .5) +
+            geom_point(aes(shape = Comparison)) +
+            facet_wrap(~Comparison) + theme_bw() +
+            scale_color_discrete(guide = FALSE) +
+            xlab("Bayes Factor BayesFactor Package") + ylab("Log Diff BFs"))
+
+bfs_long_comp_brms_bridge <- bfs.df %>% 
+  select(bf.brms.bridge, bf_bfp_vs_brms_bridge, bf_brms_sd_vs_brms_bridge, bf_brs_sd_vs_brms_bridge) %>%
+  gather(Comparison, BF_log_diff, c(bf_bfp_vs_brms_bridge, bf_brms_sd_vs_brms_bridge, bf_brs_sd_vs_brms_bridge))
+
+plotTheme(ggplot(bfs_long_comp_brms_bridge, aes(bf.brms.bridge, BF_log_diff)) + 
+            geom_segment(aes(x = -5, y = 0, xend = 22, yend = 0, colour = "red"), size = 1.5)+
+            geom_segment(aes(x = 0, y = v.min, xend = 0, yend = v.max), size = .5) +
+            geom_point(aes(shape = Comparison)) +
+            facet_wrap(~Comparison) + theme_bw() +
+            scale_color_discrete(guide = FALSE) +
+            xlab("Bayes Factor BayesFactor Package") + ylab("Log Diff BFs"))
+
 v.min <- -16
 v.max <- 16
-plotTheme(ggplot(bfs_long_comp_bfp, aes(bf.bfp, BF_log_diff)) + 
+plotTheme(ggplot(bfs_long_comp_bfp, aes(bf_brms_bridge, BF_log_diff)) + 
             labs(title = "\n") +
             labs(x="\nLog(True BF)", y="Log(comp. BF)-Log(true BF)\n") + 
             geom_segment(aes(x = -5, y = 0, xend = 22, yend = 0, colour = "red"), size = 1.5)+
