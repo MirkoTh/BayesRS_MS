@@ -1,6 +1,9 @@
 load("bfs.Rda")
 
+source("utils.R")
+
 library(tidyverse)
+library(grid)
 
 bfs.df <- as.data.frame(bfs)
 names(bfs.df) <- c("x", "n",  "nobs", "ef.cont","mcmcsteps", "bf.bfp",
@@ -30,35 +33,40 @@ bfs_long_comp_bfp <- bfs.df %>%
 v.min <- -3
 v.max <- 15
 
-plotTheme(ggplot(bfs_long_comp_bfp, aes(bf.bfp, BF_log_diff)) + 
-            geom_segment(aes(x = -5, y = 0, xend = 22, yend = 0, colour = "red"), size = 1.5)+
-            geom_segment(aes(x = 0, y = v.min, xend = 0, yend = v.max), size = .5) +
-            geom_point(aes(shape = Comparison), size = 3) +
-            facet_wrap(~Comparison) + theme_bw() +
-            scale_color_discrete(guide = FALSE) +
-            xlab("Bayes Factor BayesFactor Package") + ylab("Log Diff BFs"))
+pl_comp_bfp <- plotTheme(ggplot(bfs_long_comp_bfp, aes(bf.bfp, BF_log_diff)) + 
+                           geom_segment(aes(x = -5, y = 0, xend = 22, yend = 0, colour = "red"), size = 1.5)+
+                           geom_segment(aes(x = 0, y = v.min, xend = 0, yend = v.max), size = .5) +
+                           geom_point(aes(shape = Comparison), size = 3) +
+                           facet_wrap(~Comparison) + theme_bw() +
+                           scale_color_discrete(guide = FALSE) +
+                           xlab("Bayes Factor BayesFactor Package") + ylab("Log Diff BFs"))
 
 bfs_long_comp_brms_bridge <- bfs.df %>% 
   select(bf.brms.bridge, bf_bfp_vs_brms_bridge, bf_brms_sd_vs_brms_bridge, bf_brs_sd_vs_brms_bridge) %>%
   gather(Comparison, BF_log_diff, c(bf_bfp_vs_brms_bridge, bf_brms_sd_vs_brms_bridge, bf_brs_sd_vs_brms_bridge))
 
-plotTheme(ggplot(bfs_long_comp_brms_bridge, aes(bf.brms.bridge, BF_log_diff)) + 
-            geom_segment(aes(x = -5, y = 0, xend = 22, yend = 0, colour = "red"), size = 1.5)+
-            geom_segment(aes(x = 0, y = v.min, xend = 0, yend = v.max), size = .5) +
-            geom_point(aes(shape = Comparison), size = 3) +
-            facet_wrap(~Comparison) + theme_bw() +
-            scale_color_discrete(guide = FALSE) +
-            xlab("Bayes Factor Bridge Sampling brms Package") + ylab("Log Diff BFs"))
-
-
+pl_comp_brms_bridge <- plotTheme(ggplot(bfs_long_comp_brms_bridge, aes(bf.brms.bridge, BF_log_diff)) + 
+                                   geom_segment(aes(x = -5, y = 0, xend = 22, yend = 0, colour = "red"), size = 1.5)+
+                                   geom_segment(aes(x = 0, y = v.min, xend = 0, yend = v.max), size = .5) +
+                                   geom_point(aes(shape = Comparison), size = 3) +
+                                   facet_wrap(~Comparison) + theme_bw() +
+                                   scale_color_discrete(guide = FALSE) +
+                                   xlab("Bayes Factor Bridge Sampling brms Package") + ylab("Log Diff BFs"))
 
 # manually inspect outliers
-filter <- bfs.df$mcmcsteps == 50000 & bfs.df$bf.cont.true<(-1.1) & bfs.df$bf.cont.true>-999
-outliers <- bfs.df[filter,]
-outliers$diff <- outliers$bf.cont-outliers$bf.cont.true
-true.max <- exp(outliers$bf.cont.true[which(outliers$diff == max(outliers$diff))])
-diff.max <- exp(outliers$diff[which(outliers$diff == max(outliers$diff))])
-true.min <- exp(outliers$bf.cont.true[which(outliers$diff == min(outliers$diff))])
-diff.min <- exp(outliers$diff[which(outliers$diff == min(outliers$diff))])
+# filter <- bfs.df$mcmcsteps == 50000 & bfs.df$bf.cont.true<(-.5) & bfs.df$bf.cont.true>-999
+# outliers <- bfs.df[filter,]
+# outliers$diff <- outliers$bf.brs.sd-outliers$bf.bfp
+# true.max <- exp(outliers$bf.bfp[which(outliers$diff == max(outliers$diff))])
+# diff.max <- exp(outliers$diff[which(outliers$diff == max(outliers$diff))])
+# true.min <- exp(outliers$bf.bfp[which(outliers$diff == min(outliers$diff))])
+# diff.min <- exp(outliers$diff[which(outliers$diff == min(outliers$diff))])
 
+# saving png
+png("compare_to_bfp.png", 8, 5, "in", res = 300)
+grid.draw(pl_comp_bfp)
+dev.off()
 
+png("compare_to_bridge_brms.png", 8, 5, "in", res = 300)
+grid.draw(pl_comp_brms_bridge)
+dev.off()
